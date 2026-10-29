@@ -1,0 +1,47 @@
+name: Build patched wheels
+
+# Fork-only branch: builds linux wheels (amd64/arm64) of the patched rc8 source
+# for the fvs_paper image pipeline. Not part of any upstream pull request.
+
+on:
+  push:
+    branches: [fvs-wheel]
+
+permissions:
+  contents: write
+
+jobs:
+  wheel:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            plat: x86_64
+          - runner: ubuntu-22.04-arm
+            plat: aarch64
+    runs-on: ${{ matrix.runner }}
+    env:
+      TAG: v2.0.0rc8-fvs.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends patchelf
+          python -m pip install --upgrade pip maturin==1.15.0
+      - name: Test the Polymarket crate
+        run: cargo test --locked -p nautilus-polymarket --release --lib
+      - name: Build wheel
+        run: cd python && maturin build --release --locked --out ../dist
+      - name: Rename wheel for stable asset URLs
+        run: mv dist/*.whl "dist/nautilus_trader-2.0.0rc8-cp313-cp313-linux_${{ matrix.plat }}.whl"
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "NautilusTrader 2.0.0rc8 (fvs_paper patched build)" --notes "Patched Linux wheels of v2.0.0rc8 for the fvs_paper pipeline. Patch: fix/polymarket-unsettled-credit-strand."
+          gh release upload "$TAG" dist/*.whl --clobber
